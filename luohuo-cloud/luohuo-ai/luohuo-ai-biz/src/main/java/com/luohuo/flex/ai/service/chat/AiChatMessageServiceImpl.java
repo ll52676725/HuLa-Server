@@ -3,7 +3,10 @@ package com.luohuo.flex.ai.service.chat;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
+import com.luohuo.basic.context.ContextUtil;
+import com.luohuo.basic.tenant.core.aop.TenantIgnore;
 import com.luohuo.flex.ai.common.pojo.PageResult;
+import com.luohuo.flex.ai.controller.chat.vo.conversation.AiDelReqVO;
 import com.luohuo.flex.ai.controller.chat.vo.message.AiChatMessagePageReqVO;
 import com.luohuo.flex.ai.controller.chat.vo.message.AiChatMessageRespVO;
 import com.luohuo.flex.ai.controller.chat.vo.message.AiChatMessageSendReqVO;
@@ -139,8 +142,9 @@ public class AiChatMessageServiceImpl implements AiChatMessageService {
     }
 
     @Override
-    public Flux<R<AiChatMessageSendRespVO>> sendChatMessageStream(AiChatMessageSendReqVO sendReqVO,
-                                                                          Long userId) {
+    public Flux<R<AiChatMessageSendRespVO>> sendChatMessageStream(AiChatMessageSendReqVO sendReqVO, Long userId) {
+		ContextUtil.setIgnore(true);
+
         // 1.1 校验对话存在
         AiChatConversationDO conversation = chatConversationService
                 .validateChatConversationExists(sendReqVO.getConversationId());
@@ -195,10 +199,15 @@ public class AiChatMessageServiceImpl implements AiChatMessageService {
             // 忽略租户，因为 Flux 异步无法透传租户
             String content = contentBuffer.toString();
             chatMessageMapper.updateById(new AiChatMessageDO().setId(assistantMessage.getId()).setContent(content));
+			ContextUtil.setIgnore(false);
         }).doOnError(throwable -> {
             log.error("[sendChatMessageStream][userId({}) sendReqVO({}) 发生异常]", userId, sendReqVO, throwable);
             // 忽略租户，因为 Flux 异步无法透传租户
-        }).onErrorResume(error -> Flux.just(error(ErrorCodeConstants.CHAT_STREAM_ERROR)));
+			ContextUtil.setIgnore(false);
+        }).onErrorResume(error -> {
+			ContextUtil.setIgnore(false);
+			return Flux.just(error(ErrorCodeConstants.CHAT_STREAM_ERROR));
+		});
     }
 
     private List<AiKnowledgeSegmentSearchRespBO> recallKnowledgeSegment(String content,
@@ -333,14 +342,16 @@ public class AiChatMessageServiceImpl implements AiChatMessageService {
     }
 
     @Override
-    public void deleteChatMessageByConversationId(Long conversationId, Long userId) {
-        // 1. 校验消息存在
-        List<AiChatMessageDO> messages = chatMessageMapper.selectListByConversationId(conversationId);
-        if (CollUtil.isEmpty(messages) || ObjUtil.notEqual(messages.get(0).getUserId(), userId)) {
-            throw exception(CHAT_MESSAGE_NOT_EXIST);
-        }
-        // 2. 执行删除
-        chatMessageMapper.deleteBatchIds(convertList(messages, AiChatMessageDO::getId));
+    public void deleteChatMessageByConversationId(AiDelReqVO reqVOS, Long userId) {
+		reqVOS.getConversationIdList().forEach(conversationId -> {
+			// 1. 校验消息存在
+			List<AiChatMessageDO> messages = chatMessageMapper.selectListByConversationId(conversationId);
+			if (CollUtil.isEmpty(messages) || ObjUtil.notEqual(messages.get(0).getUserId(), userId)) {
+				throw exception(CHAT_MESSAGE_NOT_EXIST);
+			}
+			// 2. 执行删除
+			chatMessageMapper.deleteBatchIds(convertList(messages, AiChatMessageDO::getId));
+		});
     }
 
     @Override

@@ -9,20 +9,23 @@ import lombok.NoArgsConstructor;
 import java.io.Serializable;
 
 /**
- * 群成员列表的成员信息
- * @author nyh
+ * @author 乾乾
  */
 @Data
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-public class ChatMemberListResp implements Serializable {
-    @Schema(description ="uid")
-    private Long uid;
-    @Schema(description ="用户名称")
+public class GroupResp implements Serializable {
+	@Schema(description ="群聊id")
+	private Long groupId;
+    @Schema(description ="房间id")
+    private Long roomId;
+    @Schema(description ="群名称")
     private String name;
-    @Schema(description ="头像")
+    @Schema(description ="群头像")
     private String avatar;
-	@Schema(description ="账号")
+	@Schema(description = "群号")
 	private String account;
+	@Schema(description = "群备注")
+	private String remark;
 }

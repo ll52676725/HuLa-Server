@@ -8,7 +8,7 @@ import com.luohuo.basic.cache.repository.CachePlusOps;
 import com.luohuo.basic.exception.BizException;
 import com.luohuo.basic.model.cache.CacheHashKey;
 import com.luohuo.flex.common.cache.common.FeedMediaRelCacheKeyBuilder;
-import com.luohuo.flex.im.common.constant.RedisKey;
+import com.luohuo.flex.common.cache.common.FeedTargetRelCacheKeyBuilder;
 import com.luohuo.flex.im.domain.vo.req.CursorPageBaseReq;
 import com.luohuo.flex.im.domain.vo.res.CursorPageBaseResp;
 import com.luohuo.flex.im.core.chat.service.adapter.MemberAdapter;
@@ -68,12 +68,9 @@ public class FeedServiceImpl implements FeedService {
 				CacheHashKey hashKey = FeedMediaRelCacheKeyBuilder.build(feed.getId());
 				CacheResult<List<FeedMedia>> result = cachePlusOps.get(hashKey, t -> feedMediaDao.getMediaByFeedId(feed.getId()));
 				List<FeedMedia> mediaList = result.getValue();
-
-				if(CollUtil.isEmpty(mediaList)){
-					mediaList = feedMediaDao.getMediaByFeedId(feed.getId());
-					cachePlusOps.hSet(hashKey, mediaList);
+				if(CollUtil.isNotEmpty(mediaList)){
+					feedVo.setUrls(mediaList.stream().sorted(Comparator.comparingInt(FeedMedia::getSort)).map(FeedMedia::getUrl).collect(Collectors.toList()));
 				}
-				feedVo.setUrls(mediaList.stream().sorted(Comparator.comparingInt(FeedMedia::getSort)).map(FeedMedia::getUrl).collect(Collectors.toList()));
 			}
 			feedVos.add(feedVo);
 		}
@@ -87,11 +84,46 @@ public class FeedServiceImpl implements FeedService {
 	 */
 	@Override
 	public CursorPageBaseResp<FeedVo> getFeedPage(CursorPageBaseReq request, Long uid) {
-		// 1. 查询朋友圈列表
-		CursorPageBaseResp<Feed> page = feedDao.getFeedPage(uid, request);
+		// 1. 查询当前用户的所有好友ID
+		List<Long> friendIds = userFriendDao.getAllFriendIdsByUid(uid);
+		friendIds.add(uid); // 添加自己
 
-		// 2. 合并朋友圈内容
-		List<FeedVo> result = buildFeedResp(page.getList());
+		// 2. 查询这些用户的朋友圈列表
+		CursorPageBaseResp<Feed> page = feedDao.getFeedPage(friendIds, request);
+
+		// 3. 根据权限过滤朋友圈
+		List<Feed> filteredFeeds = page.getList().stream().filter(feed -> {
+			// 如果是自己的朋友圈，全部可见
+			if (feed.getUid().equals(uid)) {
+				return true;
+			}
+
+			// 根据权限类型过滤
+			FeedPermissionEnum permission = FeedPermissionEnum.get(feed.getPermission());
+			switch (permission) {
+				case privacy:
+					// 私密：只有发布者自己可见
+					return false;
+				case open:
+					// 公开：所有好友可见
+					return true;
+				case partVisible:
+					// 部分可见：查询是否在可见列表中
+					List<FeedTarget> targets = feedTargetDao.selectFeedTargets(feed.getId());
+					// type=2 表示用户，targetId 就是用户ID
+					return targets.stream().anyMatch(t -> t.getType() == 2 && t.getTargetId().equals(uid));
+				case notAnyone:
+					// 不给谁看：查询是否在不可见列表中
+					List<FeedTarget> excludes = feedTargetDao.selectFeedTargets(feed.getId());
+					// type=2 表示用户，targetId 就是用户ID
+					return excludes.stream().noneMatch(t -> t.getType() == 2 && t.getTargetId().equals(uid));
+				default:
+					return false;
+			}
+		}).collect(Collectors.toList());
+
+		// 4. 合并朋友圈内容
+		List<FeedVo> result = buildFeedResp(filteredFeeds);
 		return CursorPageBaseResp.init(page, result, page.getTotal());
 	}
 
@@ -120,9 +152,19 @@ public class FeedServiceImpl implements FeedService {
 	 * @param feed 朋友圈
 	 */
 	public void saveFeed(FeedParam param, Long uid, Feed feed) {
+		saveFeed(param, uid, feed, false);
+	}
+
+	/**
+	 * 保存朋友圈权限+素材
+	 * @param param 参数
+	 * @param uid 操作人
+	 * @param feed 朋友圈
+	 * @param needClearCache 是否需要清除缓存（编辑时为true，新建时为false）
+	 */
+	private void saveFeed(FeedParam param, Long uid, Feed feed, boolean needClearCache) {
 		List<Long> pushList = new ArrayList<>();
 		List<FeedTarget> feedTargets = new ArrayList<>();
-		List<FeedMedia> mediaList = new ArrayList<>();
 		switch (FeedPermissionEnum.get(param.getPermission())){
 			case open -> {
 				// 1. 查询所有好友，排除【不让他看我, 他不看我】的好友
@@ -169,19 +211,21 @@ public class FeedServiceImpl implements FeedService {
 		switch (FeedEnum.get(param.getMediaType())){
 			case WORD -> log.info("发布了一条纯文字朋友圈~~");
 			case IMAGE, VIDEO -> {
-				List<String> urls = param.getUrls();
-				if (CollUtil.isEmpty(urls)){
+				List<String> images = param.getImages();
+				if (CollUtil.isEmpty(images)){
 					throw new RuntimeException("请至少上传一条素材!");
 				}
-				mediaList = feedMediaDao.batchSaveMedia(feed.getId(), urls, param.getMediaType());
+				feedMediaDao.batchSaveMedia(feed.getId(), images, param.getMediaType());
 			}
 		}
 
-		// 3. 缓存权限+素材 告知 pushList 我发布了朋友圈
-		cachePlusOps.hDel(RedisKey.FEED_MEDIA, feed.getId());
-		cachePlusOps.hDel(RedisKey.FEED_TARGET, feed.getId());
-		cachePlusOps.hDel(RedisKey.FEED_MEDIA, feed.getId().toString(), mediaList);
-		cachePlusOps.hDel(RedisKey.FEED_TARGET, feed.getId().toString(), feedTargets);
+		// 3. 清除缓存
+		if (needClearCache) {
+			cachePlusOps.del(FeedMediaRelCacheKeyBuilder.build(feed.getId()));
+			cachePlusOps.del(FeedTargetRelCacheKeyBuilder.build(feed.getId()));
+		}
+
+		// 4. 告知 pushList 我发布了朋友圈
 		pushService.sendPushMsg(MemberAdapter.buildFeedPushWS(uid), pushList, uid);
 	}
 
@@ -236,8 +280,8 @@ public class FeedServiceImpl implements FeedService {
 		feedDao.removeById(feedId);
 
 		// 2. 清空缓存
-		cachePlusOps.hDel(RedisKey.FEED_TARGET, feedId);
-		cachePlusOps.hDel(RedisKey.FEED_MEDIA, feedId);
+		cachePlusOps.del(FeedTargetRelCacheKeyBuilder.build(feedId));
+		cachePlusOps.del(FeedMediaRelCacheKeyBuilder.build(feedId));
 		return true;
 	}
 
@@ -253,12 +297,12 @@ public class FeedServiceImpl implements FeedService {
 	public FeedVo feedDetail(Long feedId) {
 		FeedVo feed = getDetail(feedId);
 
-		if(feed.getMediaType().equals(FeedEnum.WORD.getType())){
-			CacheResult<Object> cacheResult = cachePlusOps.hGet(FeedMediaRelCacheKeyBuilder.build(feedId));
-			List<FeedMedia> feedMediaList = cacheResult.asList();
-			if(CollUtil.isEmpty(feedMediaList)){
-				feedMediaList = feedMediaDao.getMediaByFeedId(feedId);
-			}
+		if(!feed.getMediaType().equals(FeedEnum.WORD.getType())){
+			// 使用带回调的方式，自动处理缓存读写
+			CacheHashKey hashKey = FeedMediaRelCacheKeyBuilder.build(feedId);
+			CacheResult<List<FeedMedia>> result = cachePlusOps.get(hashKey, t -> feedMediaDao.getMediaByFeedId(feedId));
+			List<FeedMedia> feedMediaList = result.getValue();
+
 			if (CollUtil.isNotEmpty(feedMediaList)){
 				feed.setUrls(feedMediaList.stream().sorted(Comparator.comparingInt(FeedMedia::getSort)).map(FeedMedia::getUrl).collect(Collectors.toList()));
 			}
@@ -284,11 +328,8 @@ public class FeedServiceImpl implements FeedService {
 
 		// 处理朋友圈权限
 		if(feedVo.getPermission().equals(FeedPermissionEnum.partVisible.getType()) || feedVo.getPermission().equals(FeedPermissionEnum.notAnyone.getType())){
-			CacheResult<Object> cacheResult = cachePlusOps.hGet(FeedMediaRelCacheKeyBuilder.build(feedId));
+			CacheResult<Object> cacheResult = cachePlusOps.hGet(FeedTargetRelCacheKeyBuilder.build(feedId), t -> feedTargetDao.selectFeedTargets(feedId));
 			List<FeedTarget> feedTargets = cacheResult.asList();
-			if(CollUtil.isEmpty(feedTargets)){
-				feedTargets = feedTargetDao.selectFeedTargets(feedId);
-			}
 
 			List<Long> taggetList = feedTargets.stream().filter(item -> item.getType().equals(1)).map(FeedTarget::getTargetId).collect(Collectors.toUnmodifiableList());
 			List<Long> userList = feedTargets.stream().filter(item -> item.getType().equals(2)).map(FeedTarget::getTargetId).collect(Collectors.toUnmodifiableList());
@@ -322,8 +363,8 @@ public class FeedServiceImpl implements FeedService {
 		feedTargetDao.delByFeedId(feed.getId());
 		feedMediaDao.delMediaByFeedId(feed.getId());
 
-		// 3. 更新朋友圈的权限+素材
-		saveFeed(param, uid, feed);
+		// 3. 更新朋友圈的权限+素材（编辑场景，需要清除缓存）
+		saveFeed(param, uid, feed, true);
 		return true;
 	}
 }
