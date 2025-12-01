@@ -21,3 +21,9 @@ info:
   name: '@project.name@'
   description: '@project.description@'
   version: '@project.version@'
+
+luohuo:
+  seata:
+    ip: ${SEATA_IP:@seata.ip@}
+    port: ${SEATA_PORT:@seata.port@}
+    namespace: ${SEATA_NAMESPACE:@seata.namespace@}

@@ -330,5 +330,32 @@ feign:
     response: # 响应压缩
       enabled: true
 
+# Seata 配置
+seata:
+  enabled: true
+  application-id: ${spring.application.name}
+  tx-service-group: ${spring.application.name}-group
+  service:
+    vgroup-mapping:
+      ${spring.application.name}-group: default
+    grouplist:
+      default: ${luohuo.seata.ip}:${luohuo.seata.port}
+  config:
+    type: nacos
+    nacos:
+      server-addr: ${spring.cloud.nacos.server-addr}
+      namespace: ${luohuo.seata.namespace}
+      group: SEATA_GROUP
+      username: ${spring.cloud.nacos.username}
+      password: ${spring.cloud.nacos.password}
+  registry:
+    type: nacos
+    nacos:
+      server-addr: ${spring.cloud.nacos.server-addr}
+      namespace: ${luohuo.seata.namespace}
+      group: SEATA_GROUP
+      username: ${spring.cloud.nacos.username}
+      password: ${spring.cloud.nacos.password}
+
 
 
