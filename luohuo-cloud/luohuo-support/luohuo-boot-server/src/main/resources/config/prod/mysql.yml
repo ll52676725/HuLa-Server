@@ -36,7 +36,7 @@ luohuo:
     # 是否启用  sql性能规范插件
     isBlockAttack: false
     # 是否启用分布式事务
-    isSeata: false
+    isSeata: true
     # 生产环境请设置p6spy = false
     p6spy: false
     # id生成策略

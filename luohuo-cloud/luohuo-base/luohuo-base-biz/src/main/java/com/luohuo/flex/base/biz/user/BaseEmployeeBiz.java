@@ -215,4 +215,16 @@ public class BaseEmployeeBiz {
 		return baseEmployeeService.removeByIds(employeeIdList);
 	}
 
+	/**
+	 * 测试事务回滚
+	 */
+	@GlobalTransactional
+	public void testTransaction(BaseEmployee employee) {
+		// 保存员工信息
+		baseEmployeeService.save(employee);
+
+		// 抛出一个异常，验证事务是否回滚
+		throw new BizException("测试事务回滚");
+	}
+
 }

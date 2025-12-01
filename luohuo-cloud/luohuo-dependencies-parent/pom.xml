@@ -149,6 +149,17 @@
                 <artifactId>transmittable-thread-local</artifactId> <!-- 解决 ThreadLocal 父子线程的传值问题 -->
                 <version>${transmittable-thread-local.version}</version>
             </dependency>
+            <!-- Seata 分布式事务依赖 -->
+            <dependency>
+                <groupId>io.seata</groupId>
+                <artifactId>seata-spring-boot-starter</artifactId>
+                <version>${seata.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.seata</groupId>
+                <artifactId>seata-all</artifactId>
+                <version>${seata.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
