@@ -24,7 +24,7 @@ luohuo:
     isBlockAttack: false
     isDataScope: true
     p6spy: true
-    isSeata: false
+    isSeata: true
     id-type: CACHE
     hutoolId:
       workerId: 0
