@@ -54,11 +54,11 @@ public class FeignAddHeaderRequestInterceptor implements RequestInterceptor {
 
     @Override
     public void apply(RequestTemplate template) {
-        // 需要seata-all的依赖，若需使用seata，请打开以下代码
-//        String xid = RootContext.getXID();
-//        if (StrUtil.isNotEmpty(xid)) {
-//            template.header(RootContext.KEY_XID, xid);
-//        }
+        // 传递Seata分布式事务XID
+        String xid = io.seata.core.context.RootContext.getXID();
+        if (cn.hutool.core.util.StrUtil.isNotEmpty(xid)) {
+            template.header(io.seata.core.context.RootContext.KEY_XID, xid);
+        }
 
         template.header(ContextConstants.FEIGN, StrPool.TRUE);
         log.info("thread id ={}, name={}", Thread.currentThread().getId(), Thread.currentThread().getName());
